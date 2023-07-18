@@ -1,7 +1,7 @@
 project(
     'cava',
     'c',
-    version: '0.8.4',
+    version: '0.8.5',
     license: 'MIT',
     meson_version: '>=0.50.0',
     default_options : [
@@ -238,7 +238,7 @@ install_headers(h_O_files, subdir: 'cava/output')
 pkg = import('pkgconfig')
 pkg.generate(libraries: cava_lib,
              subdirs: ['cava', 'cava/input', 'cava/output'],
-             version: '0.8.4',
+             version: '0.8.5',
              name: 'libcava',
              filebase: 'cava',
              description: 'A cava library')
