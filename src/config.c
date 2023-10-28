@@ -49,7 +49,7 @@ const char *default_shader_name[NUMBER_OF_SHADERS] = {"northern_lights.frag", "p
 double smoothDef[5] = {1, 1, 1, 1, 1};
 
 enum input_method default_methods[] = {
-    INPUT_FIFO, INPUT_PORTAUDIO, INPUT_ALSA, INPUT_PULSE, INPUT_WINSCAP,
+    INPUT_FIFO, INPUT_PORTAUDIO, INPUT_ALSA, INPUT_PIPEWIRE, INPUT_PULSE, INPUT_WINSCAP,
 };
 
 char *outputMethod, *orientation, *channels, *xaxisScale, *monoOption, *fragmentShader,
@@ -224,7 +224,7 @@ bool validate_config(struct config_params *p, struct error_s *error) {
     if (strcmp(outputMethod, "sdl_glsl") == 0) {
         p->output = OUTPUT_SDL_GLSL;
 #ifndef SDL_GLSL
-        write_errorf(error, "cava was built without sdl support, install sdl dev files "
+        write_errorf(error, "cava was built without opengl support, install opengl dev files "
                             "and run make clean && ./configure && make again\n");
         return false;
 #endif
@@ -388,6 +388,10 @@ bool validate_config(struct config_params *p, struct error_s *error) {
     }
 
     // setting sens
+    if (p->sens < 1) {
+        write_errorf(error, "Sensitivity needs to be at least 1%%\n");
+        return false;
+    }
     p->sens = p->sens / 100;
 
     return validate_colors(p, error);
@@ -678,11 +682,11 @@ bool load_config(char configPath[PATH_MAX], struct config_params *p, bool colors
 
     free(p->audio_source);
 
-    int default_input = -1;
+    enum input_method default_input = INPUT_FIFO;
     for (size_t i = 0; i < ARRAY_SIZE(default_methods); i++) {
         enum input_method method = default_methods[i];
         if (has_input_method[method]) {
-            default_input++;
+            default_input = default_methods[i];
         }
     }
     char *input_method_name =
