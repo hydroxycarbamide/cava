@@ -301,7 +301,9 @@ int audio_raw_init(struct audio_data *audio, struct audio_raw *audio_raw, struct
     return 0;
 }
 
-int audio_raw_fetch(struct audio_raw *audio_raw, struct config_params *prm, int *re_paint) {
+int audio_raw_fetch(struct audio_raw *audio_raw, struct config_params *prm, int *re_paint,
+                    struct cava_plan *plan) {
+    (void)plan;
     for (int n = 0;
          n < (audio_raw->number_of_bars / audio_raw->output_channels) * audio_raw->channels; n++) {
         if (prm->output != OUTPUT_SDL_GLSL) {
