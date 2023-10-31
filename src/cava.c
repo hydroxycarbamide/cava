@@ -405,7 +405,7 @@ as of 0.4.0 all options are specified in config file, see in '/home/username/.co
                 int re_paint = 0;
 
                 // Do transformation under raw data
-                audio_raw_fetch(&audio_raw, &p, &re_paint);
+                audio_raw_fetch(&audio_raw, &p, &re_paint, plan);
 
 // output: draw processed input
 #ifdef NDEBUG

@@ -48,7 +48,8 @@ struct audio_raw {
 int audio_raw_init(struct audio_data *audio, struct audio_raw *audio_raw, struct config_params *prm,
                    struct cava_plan *plan);
 
-int audio_raw_fetch(struct audio_raw *audio_raw, struct config_params *prm, int *re_paint);
+int audio_raw_fetch(struct audio_raw *audio_raw, struct config_params *prm, int *re_paint,
+                    struct cava_plan *plan);
 
 int audio_raw_clean(struct audio_raw *audio_raw);
 int audio_raw_destroy(struct audio_raw *audio_raw);
