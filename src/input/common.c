@@ -4,6 +4,8 @@
 #else
 #include "cava/input/alsa.h"
 #include "cava/input/fifo.h"
+#include "cava/input/jack.h"
+#include "cava/input/oss.h"
 #include "cava/input/pipewire.h"
 #include "cava/input/portaudio.h"
 #include "cava/input/pulse.h"
@@ -72,6 +74,20 @@ void reset_output_buffers(struct audio_data *data) {
     pthread_mutex_unlock(&audio->lock);
 }
 
+void signal_threadparams(struct audio_data *data) {
+    struct audio_data *audio = (struct audio_data *)data;
+    pthread_mutex_lock(&audio->lock);
+    audio->threadparams = 0;
+    pthread_mutex_unlock(&audio->lock);
+}
+
+void signal_terminate(struct audio_data *data) {
+    struct audio_data *audio = (struct audio_data *)data;
+    pthread_mutex_lock(&audio->lock);
+    audio->terminate = 1;
+    pthread_mutex_unlock(&audio->lock);
+}
+
 #ifdef ALSA
 static bool is_loop_device_for_sure(const char *text) {
     const char *const LOOPBACK_DEVICE_PREFIX = "hw:Loopback,";
@@ -96,6 +112,7 @@ ptr get_input(struct audio_data *audio, struct config_params *prm) {
     audio->cava_in = (double *)malloc(audio->cava_buffer_size * sizeof(double));
     memset(audio->cava_in, 0, sizeof(int) * audio->cava_buffer_size);
 
+    audio->threadparams = 0; // most input threads don't adjust the parameters
     audio->terminate = 0;
 
     debug("starting audio thread\n");
@@ -119,8 +136,8 @@ ptr get_input(struct audio_data *audio, struct config_params *prm) {
         break;
 #endif
     case INPUT_FIFO:
-        audio->rate = prm->fifoSample;
-        audio->format = prm->fifoSampleBits;
+        audio->rate = prm->samplerate;
+        audio->format = prm->samplebits;
         ret = &input_fifo;
         break;
 
@@ -158,9 +175,28 @@ ptr get_input(struct audio_data *audio, struct config_params *prm) {
 
 #ifdef PIPEWIRE
     case INPUT_PIPEWIRE:
-        audio->format = 16;
-        audio->rate = 44100;
+        audio->format = prm->samplebits;
+        audio->rate = prm->samplerate;
         ret = &input_pipewire;
+        break;
+#endif
+
+#ifdef OSS
+    case INPUT_OSS:
+        audio->format = prm->samplebits;
+        audio->rate = prm->samplerate;
+        audio->channels = prm->channels;
+        audio->threadparams = 1; // OSS can adjust parameters
+        ret = &input_oss;
+        break;
+#endif
+
+#ifdef JACK
+    case INPUT_JACK:
+        audio->channels = prm->channels;
+        audio->autoconnect = prm->autoconnect;
+        audio->threadparams = 1; // JACK server provides parameters
+        ret = &input_jack;
         break;
 #endif
 

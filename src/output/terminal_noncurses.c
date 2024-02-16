@@ -42,10 +42,15 @@ int setecho(int fd, int onoff) {
     if (tcgetattr(fd, &t) == -1)
         return -1;
 
-    if (onoff == 0)
+    if (onoff == 0) {
         t.c_lflag &= ~(ECHO | ECHOE | ECHOK | ECHONL | ICANON);
-    else
+        t.c_cc[VTIME] = 0;
+        t.c_cc[VMIN] = 0;
+    } else {
         t.c_lflag |= (ECHO | ECHOE | ECHOK | ECHONL | ICANON);
+        t.c_cc[VTIME] = 0;
+        t.c_cc[VMIN] = 1;
+    }
 
     if (tcsetattr(fd, TCSANOW, &t) == -1)
         return -1;
@@ -153,8 +158,9 @@ int init_terminal_noncurses(int tty, char *const fg_color_string, char *const bg
     system("cls");
 
 #else
+#ifndef __FreeBSD__
     system("setterm -cursor off");
-    system("setterm -blank 0");
+#endif
     system("clear");
 #endif
 
@@ -414,10 +420,13 @@ void cleanup_terminal_noncurses(void) {
     system("cls");
 #else
     setecho(STDIN_FILENO, 1);
+#ifdef __FreeBSD__
+    system("vidcontrol -f >/dev/null 2>&1");
+#else
     system("setfont  >/dev/null 2>&1");
     system("setfont /usr/share/consolefonts/Lat2-Fixed16.psf.gz  >/dev/null 2>&1");
     system("setterm -cursor on");
-    system("setterm -blank 10");
+#endif
     system("clear");
 #endif
     printf("\033[0m\n");
