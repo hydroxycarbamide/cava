@@ -156,7 +156,7 @@ as of 0.4.0 all options are specified in config file, see in '/home/username/.co
 
         output_mode = p.output;
 #ifndef _MSC_VER
-        if (output_mode != OUTPUT_RAW && output_mode != OUTPUT_NORITAKE) {
+        if (output_mode == OUTPUT_NCURSES || output_mode == OUTPUT_NONCURSES) {
             // Check if we're running in a tty
             if (strncmp(ttyname(0), "/dev/tty", 8) == 0 || strcmp(ttyname(0), "/dev/console") == 0)
                 p.inAtty = 1;
@@ -165,17 +165,30 @@ as of 0.4.0 all options are specified in config file, see in '/home/username/.co
             if (strncmp(ttyname(0), "/dev/ttys", 9) == 0)
                 p.inAtty = 0;
             if (p.inAtty) {
+#ifdef CAVAFONT
                 // checking if cava psf font is installed in FONTDIR
                 FILE *font_file;
-                font_file = fopen(FONTDIR "/cava.psf", "r");
+                font_file = fopen(FONTDIR "/" FONTFILE, "r");
                 if (font_file) {
                     fclose(font_file);
-                    system("setfont " FONTDIR "/cava.psf  >/dev/null 2>&1");
+#ifdef __FreeBSD__
+                    system("vidcontrol -f " FONTDIR "/" FONTFILE " >/dev/null 2>&1");
+#else
+                    system("setfont " FONTDIR "/" FONTFILE " >/dev/null 2>&1");
+#endif
                 } else {
                     // if not it might still be available, we dont know, must try
-                    system("setfont cava.psf  >/dev/null 2>&1");
+#ifdef __FreeBSD__
+                    system("vidcontrol -f " FONTFILE " >/dev/null 2>&1");
+#else
+                    system("setfont " FONTFILE " >/dev/null 2>&1");
+#endif
                 }
-                system("setterm -blank 0");
+#endif // CAVAFONT
+#ifndef __FreeBSD__
+                if (p.disable_blanking)
+                    system("setterm -blank 0");
+#endif
             }
 
             // We use unicode block characters to draw the bars and
@@ -208,6 +221,7 @@ as of 0.4.0 all options are specified in config file, see in '/home/username/.co
         audio.samples_counter = 0;
         audio.channels = 2;
         audio.IEEE_FLOAT = 0;
+        audio.autoconnect = 0;
 
         audio.input_buffer_size = BUFFER_SIZE * audio.channels;
         audio.cava_buffer_size = audio.input_buffer_size * 8;
@@ -238,7 +252,7 @@ as of 0.4.0 all options are specified in config file, see in '/home/username/.co
             nanosleep(&timeout_timer, NULL);
 #endif
             pthread_mutex_lock(&audio.lock);
-            if (audio.format != -1 && audio.rate != 0)
+            if ((audio.threadparams == 0) && (audio.format != -1) && (audio.rate != 0))
                 break;
 
             pthread_mutex_unlock(&audio.lock);
@@ -290,11 +304,11 @@ as of 0.4.0 all options are specified in config file, see in '/home/username/.co
                 if (output_mode == OUTPUT_NCURSES)
                     ch = getch();
 #endif
-                /*
-                // disabled key controls in non-curses mode, caused garbage on screen
+
+#ifndef _MSC_VER
                 if (output_mode == OUTPUT_NONCURSES)
-                    ch = fgetc(stdin);
-                */
+                    read(0, &ch, sizeof(ch));
+#endif
 
                 switch (ch) {
                 case 65: // key up
@@ -337,6 +351,8 @@ as of 0.4.0 all options are specified in config file, see in '/home/username/.co
                     should_reload = 1;
                     should_quit = 1;
                 }
+
+                ch = 0;
 
                 if (should_reload) {
 
@@ -396,7 +412,23 @@ as of 0.4.0 all options are specified in config file, see in '/home/username/.co
 
                 // process: execute cava
                 pthread_mutex_lock(&audio.lock);
-                cava_execute(audio.cava_in, audio.samples_counter, audio_raw.cava_out, plan);
+                if (p.waveform) {
+                    for (int n = 0; n < audio.samples_counter; n++) {
+
+                        for (int i = audio_raw.number_of_bars - 1; i > 0; i--) {
+                            audio_raw.cava_out[i] = audio_raw.cava_out[i - 1];
+                        }
+                        if (audio.channels == 2) {
+                            audio_raw.cava_out[0] =
+                                p.sens * (audio.cava_in[n] / 2 + audio.cava_in[n + 1] / 2);
+                            ++n;
+                        } else {
+                            audio_raw.cava_out[0] = p.sens * audio.cava_in[n];
+                        }
+                    }
+                } else {
+                    cava_execute(audio.cava_in, audio.samples_counter, audio_raw.cava_out, plan);
+                }
                 if (audio.samples_counter > 0) {
                     audio.samples_counter = 0;
                 }

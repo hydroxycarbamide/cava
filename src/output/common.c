@@ -189,7 +189,6 @@ int audio_raw_init(struct audio_data *audio, struct audio_raw *audio_raw, struct
         if (audio_raw->number_of_bars % 2 != 0)
             audio_raw->number_of_bars--;
     }
-
     // checks if there is stil extra room, will use this to center
     audio_raw->remainder = (*audio_raw->dimension_bar - audio_raw->number_of_bars * prm->bar_width -
                             audio_raw->number_of_bars * prm->bar_spacing + prm->bar_spacing) /
@@ -304,102 +303,113 @@ int audio_raw_init(struct audio_data *audio, struct audio_raw *audio_raw, struct
 int audio_raw_fetch(struct audio_raw *audio_raw, struct config_params *prm, int *re_paint,
                     struct cava_plan *plan) {
     (void)plan;
-    for (int n = 0;
-         n < (audio_raw->number_of_bars / audio_raw->output_channels) * audio_raw->channels; n++) {
-        if (prm->output != OUTPUT_SDL_GLSL) {
-            audio_raw->cava_out[n] *= *audio_raw->dimension_value;
+    for (int n = 0; n < audio_raw->number_of_bars; n++) {
+        if (!prm->waveform) {
+            audio_raw->cava_out[n] *= prm->sens;
+        } else {
+            if (audio_raw->cava_out[n] > 1.0)
+                prm->sens *= 0.999;
+            else
+                prm->sens *= 1.0001;
+            audio_raw->cava_out[n] = (audio_raw->cava_out[n] + 1.0) / 2.0;
         }
-
-        audio_raw->cava_out[n] *= prm->sens;
 
         if (prm->output == OUTPUT_SDL_GLSL) {
             if (audio_raw->cava_out[n] > 1.0)
                 audio_raw->cava_out[n] = 1.0;
             else if (audio_raw->cava_out[n] < 0.0)
                 audio_raw->cava_out[n] = 0.0;
+        } else {
+            audio_raw->cava_out[n] *= *audio_raw->dimension_value;
         }
-    }
-
-    if (audio_raw->channels == 2) {
-        for (int n = 0; n < audio_raw->number_of_bars / audio_raw->output_channels; n++) {
-            if (prm->userEQ_enabled)
-                audio_raw->cava_out[n] *=
-                    prm->userEQ[(int)floor(((double)n) * audio_raw->userEQ_keys_to_bars_ratio)];
-            audio_raw->bars_left[n] = audio_raw->cava_out[n];
-        }
-        for (int n = 0; n < audio_raw->number_of_bars / audio_raw->output_channels; n++) {
-            if (prm->userEQ_enabled)
-                audio_raw->cava_out[n + audio_raw->number_of_bars / audio_raw->output_channels] *=
-                    prm->userEQ[(int)floor(((double)n) * audio_raw->userEQ_keys_to_bars_ratio)];
-            audio_raw->bars_right[n] =
-                audio_raw->cava_out[n + audio_raw->number_of_bars / audio_raw->output_channels];
-        }
-    } else {
-        for (int n = 0; n < audio_raw->number_of_bars; n++) {
-            if (prm->userEQ_enabled)
-                audio_raw->cava_out[n] *=
-                    prm->userEQ[(int)floor(((double)n) * audio_raw->userEQ_keys_to_bars_ratio)];
+        if (prm->waveform) {
             audio_raw->bars_raw[n] = audio_raw->cava_out[n];
         }
     }
 
-    // process [filter]
-    if (prm->monstercat) {
+    if (!prm->waveform) {
         if (audio_raw->channels == 2) {
-            audio_raw->bars_left = monstercat_filter(
-                audio_raw->bars_left, audio_raw->number_of_bars / audio_raw->output_channels,
-                prm->waves, prm->monstercat);
-            audio_raw->bars_right = monstercat_filter(
-                audio_raw->bars_right, audio_raw->number_of_bars / audio_raw->output_channels,
-                prm->waves, prm->monstercat);
-        } else {
-            audio_raw->bars_raw = monstercat_filter(audio_raw->bars_raw, audio_raw->number_of_bars,
-                                                    prm->waves, prm->monstercat);
-        }
-    }
-    if (audio_raw->channels == 2) {
-        if (prm->stereo) {
-            // mirroring stereo channels
-            for (int n = 0; n < audio_raw->number_of_bars; n++) {
-                if (n < audio_raw->number_of_bars / 2) {
-                    if (prm->reverse) {
-                        audio_raw->bars_raw[n] = audio_raw->bars_left[n];
-                    } else {
-                        audio_raw->bars_raw[n] =
-                            audio_raw->bars_left[audio_raw->number_of_bars / 2 - n - 1];
-                    }
-                } else {
-                    if (prm->reverse) {
-                        audio_raw->bars_raw[n] =
-                            audio_raw->bars_right[audio_raw->number_of_bars - n - 1];
-                    } else {
-                        audio_raw->bars_raw[n] =
-                            audio_raw->bars_right[n - audio_raw->number_of_bars / 2];
-                    }
-                }
+            for (int n = 0; n < audio_raw->number_of_bars / audio_raw->output_channels; n++) {
+                if (prm->userEQ_enabled)
+                    audio_raw->cava_out[n] *=
+                        prm->userEQ[(int)floor(((double)n) * audio_raw->userEQ_keys_to_bars_ratio)];
+                audio_raw->bars_left[n] = audio_raw->cava_out[n];
+            }
+            for (int n = 0; n < audio_raw->number_of_bars / audio_raw->output_channels; n++) {
+                if (prm->userEQ_enabled)
+                    audio_raw
+                        ->cava_out[n + audio_raw->number_of_bars / audio_raw->output_channels] *=
+                        prm->userEQ[(int)floor(((double)n) * audio_raw->userEQ_keys_to_bars_ratio)];
+                audio_raw->bars_right[n] =
+                    audio_raw->cava_out[n + audio_raw->number_of_bars / audio_raw->output_channels];
             }
         } else {
-            // stereo mono output
             for (int n = 0; n < audio_raw->number_of_bars; n++) {
-                if (prm->reverse) {
-                    if (prm->mono_opt == AVERAGE) {
-                        audio_raw->bars_raw[audio_raw->number_of_bars - n - 1] =
-                            (audio_raw->bars_left[n] + audio_raw->bars_right[n]) / 2;
-                    } else if (prm->mono_opt == LEFT) {
-                        audio_raw->bars_raw[audio_raw->number_of_bars - n - 1] =
-                            audio_raw->bars_left[n];
-                    } else if (prm->mono_opt == RIGHT) {
-                        audio_raw->bars_raw[audio_raw->number_of_bars - n - 1] =
-                            audio_raw->bars_right[n];
+                if (prm->userEQ_enabled)
+                    audio_raw->cava_out[n] *=
+                        prm->userEQ[(int)floor(((double)n) * audio_raw->userEQ_keys_to_bars_ratio)];
+                audio_raw->bars_raw[n] = audio_raw->cava_out[n];
+            }
+        }
+
+        // process [filter]
+        if (prm->monstercat) {
+            if (audio_raw->channels == 2) {
+                audio_raw->bars_left = monstercat_filter(
+                    audio_raw->bars_left, audio_raw->number_of_bars / audio_raw->output_channels,
+                    prm->waves, prm->monstercat);
+                audio_raw->bars_right = monstercat_filter(
+                    audio_raw->bars_right, audio_raw->number_of_bars / audio_raw->output_channels,
+                    prm->waves, prm->monstercat);
+            } else {
+                audio_raw->bars_raw = monstercat_filter(
+                    audio_raw->bars_raw, audio_raw->number_of_bars, prm->waves, prm->monstercat);
+            }
+        }
+        if (audio_raw->channels == 2) {
+            if (prm->stereo) {
+                // mirroring stereo channels
+                for (int n = 0; n < audio_raw->number_of_bars; n++) {
+                    if (n < audio_raw->number_of_bars / 2) {
+                        if (prm->reverse) {
+                            audio_raw->bars_raw[n] = audio_raw->bars_left[n];
+                        } else {
+                            audio_raw->bars_raw[n] =
+                                audio_raw->bars_left[audio_raw->number_of_bars / 2 - n - 1];
+                        }
+                    } else {
+                        if (prm->reverse) {
+                            audio_raw->bars_raw[n] =
+                                audio_raw->bars_right[audio_raw->number_of_bars - n - 1];
+                        } else {
+                            audio_raw->bars_raw[n] =
+                                audio_raw->bars_right[n - audio_raw->number_of_bars / 2];
+                        }
                     }
-                } else {
-                    if (prm->mono_opt == AVERAGE) {
-                        audio_raw->bars_raw[n] =
-                            (audio_raw->bars_left[n] + audio_raw->bars_right[n]) / 2;
-                    } else if (prm->mono_opt == LEFT) {
-                        audio_raw->bars_raw[n] = audio_raw->bars_left[n];
-                    } else if (prm->mono_opt == RIGHT) {
-                        audio_raw->bars_raw[n] = audio_raw->bars_right[n];
+                }
+            } else {
+                // stereo mono output
+                for (int n = 0; n < audio_raw->number_of_bars; n++) {
+                    if (prm->reverse) {
+                        if (prm->mono_opt == AVERAGE) {
+                            audio_raw->bars_raw[audio_raw->number_of_bars - n - 1] =
+                                (audio_raw->bars_left[n] + audio_raw->bars_right[n]) / 2;
+                        } else if (prm->mono_opt == LEFT) {
+                            audio_raw->bars_raw[audio_raw->number_of_bars - n - 1] =
+                                audio_raw->bars_left[n];
+                        } else if (prm->mono_opt == RIGHT) {
+                            audio_raw->bars_raw[audio_raw->number_of_bars - n - 1] =
+                                audio_raw->bars_right[n];
+                        }
+                    } else {
+                        if (prm->mono_opt == AVERAGE) {
+                            audio_raw->bars_raw[n] =
+                                (audio_raw->bars_left[n] + audio_raw->bars_right[n]) / 2;
+                        } else if (prm->mono_opt == LEFT) {
+                            audio_raw->bars_raw[n] = audio_raw->bars_left[n];
+                        } else if (prm->mono_opt == RIGHT) {
+                            audio_raw->bars_raw[n] = audio_raw->bars_right[n];
+                        }
                     }
                 }
             }
@@ -416,8 +426,9 @@ int audio_raw_fetch(struct audio_raw *audio_raw, struct config_params *prm, int 
 
     for (int n = 0; n < audio_raw->number_of_bars; n++) {
         audio_raw->bars[n] = audio_raw->bars_raw[n];
-        // zero values causes divided by zero segfault (if not raw)
-        if (prm->output != OUTPUT_RAW && prm->output != OUTPUT_NORITAKE && audio_raw->bars[n] < 1)
+        // show idle bar heads
+        if (prm->output != OUTPUT_RAW && prm->output != OUTPUT_NORITAKE && audio_raw->bars[n] < 1 &&
+            prm->waveform == 0 && prm->show_idle_bar_heads == 1)
             audio_raw->bars[n] = 1;
 #ifdef SDL_GLSL
 

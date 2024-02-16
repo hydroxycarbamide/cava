@@ -1,7 +1,7 @@
 project(
     'cava',
     'c',
-    version: '0.9.1',
+    version: '0.10.1',
     license: 'MIT',
     meson_version: '>=0.50.0',
     default_options : [
@@ -9,6 +9,10 @@ project(
                 'buildtype=release'
     ]
 )
+
+is_linux = host_machine.system() == 'linux'
+is_mac = host_machine.system() == 'darwin'
+is_freebsd = host_machine.system() == 'freebsd'
 
 cc = meson.get_compiler('c')
 conf = configuration_data()
@@ -48,9 +52,12 @@ h_O_files = files('include/cava/output/common.h',
 deps = []
 inc_dirs = ['include']
 
+if is_mac
+   add_project_arguments('-DNORT', language: 'c')
+endif
+
 add_project_arguments('-DPACKAGE="@0@"'.format(meson.project_name()), language: 'c')
 add_project_arguments('-DVERSION="@0@"'.format(meson.project_version()), language: 'c')
-add_project_arguments('-DFONTDIR="@0@"'.format(join_paths(get_option('prefix'), 'share/consolefonts')), language: 'c')
 
 if not get_option('debug')
    add_project_arguments('-DNDEBUG', language: 'c')
@@ -206,6 +213,84 @@ if sdl2_dep.found()
    else
       warning('SDL_Init method in sdl2 library is not found. building without sdl2')
    endif
+endif
+
+### OSS
+if not get_option('input_oss').disabled()
+   have_oss = false
+   if cc.check_header('sys/soundcard.h')
+      code = '''
+#include <sys/soundcard.h>
+int main(int argc, char** argv) {
+    static const int fmts_sle[] = {AFMT_S16_LE, AFMT_S32_LE, AFMT_S24_LE, AFMT_S8};
+    return 0;
+}
+'''
+      if cc.links(code)
+         have_oss = true
+      endif
+   endif
+
+   if have_oss
+      src_files += 'src/input/oss.c'
+      h_I_files += 'include/cava/input/oss.h'
+      add_project_arguments('-DOSS -D__BSD_VISIBLE', language: 'c')
+   else
+      warning('No oss dev files found. building without oss')
+   endif
+endif
+
+### JACK
+jack_dep = dependency('jack', required: get_option('input_jack'), not_found_message: 'jack library is not found. building without jack')
+if jack_dep.found()
+   src_files += 'src/input/jack.c'
+   h_I_files += 'include/cava/input/jack.h'
+   deps += jack_dep
+   add_project_arguments('-DJACK', language: 'c')
+endif
+
+### Cava font
+have_font = false
+if get_option('cava_font')
+   if is_freebsd
+      vtfontcvt_prog = find_program('vtfontcvt', native: true)
+      psf2bdf_prog = find_program('psf2bdf', native: true)
+
+      if vtfontcvt_prog.found() and psf2bdf_prog.found()
+         cava_bdf = configure_file(
+            command: [
+               psf2bdf, '--fontname="-gnu-cava-medium-r-normal--16-160-75-75-c-80-iso10646-1"',
+               '@INPUT@ @OUTPUT@'],
+            input: 'cava.psf',
+            output: 'cava.bdf'
+         )
+         cava_fnt = configure_file(
+            command: [
+               vtfontcvt, '-o', '@OUTPUT@ @INPUT@'],
+            input: 'cava.bdf',
+            output: 'cava.fnt'
+         )
+
+         have_font = true
+         font_dir = join_paths(get_option('prefix'), 'share/cava')
+         font_file = 'cava.fnt'
+      else
+         warning('Font conversion tool missing. Building without cava font supported!')
+      endif
+   else
+      have_font = true
+      font_dir = join_paths(get_option('prefix'), 'share/consolefonts')
+      font_file = 'cava.psf'
+   endif
+endif
+
+if have_font
+   add_project_arguments('-DFONTDIR="@0@"'.format(font_dir), language: 'c')
+   add_project_arguments('-DFONTFILE="@0@"'.format(font_file), language: 'c')
+   add_project_arguments('-DCAVAFONT', language: 'c')
+
+   install_data(font_file,
+      install_dir: font_dir)
 endif
 
 cava_lib = shared_library('cava',

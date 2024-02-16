@@ -23,7 +23,9 @@ by [Karl Stavestrand](mailto:karl@stavestrand.no)
   - [Pipewire](#pipewire)
   - [ALSA](#alsa)
   - [MPD](#mpd)
-  - [sndio](#sndio)
+  - [Sndio](#sndio)
+  - [OSS](#oss)
+  - [JACK](#jack)
   - [squeezelite](#squeezelite)
   - [macOS](#macos-1)
   - [Windows](#windows)
@@ -71,7 +73,6 @@ Required components:
 
 
 Recomended components:
-* [ncursesw dev files](http://www.gnu.org/software/ncurses/) (bundled in ncurses in arch)
 
 The development lib of one of these audio frameworks, depending on your distro:
 * ALSA
@@ -79,20 +80,32 @@ The development lib of one of these audio frameworks, depending on your distro:
 * Pipewire
 * Portaudio
 * Sndio
+* JACK
+
 
 Optional components:
 * SDL2 dev files
+* [ncursesw dev files](http://www.gnu.org/software/ncurses/) (bundled in ncurses in arch)
 
-Only FFTW and the other build tools are actually required for CAVA to compile, but this will only give you the ability to read from fifo files. To more easly grab audio from your system pulseaudio, alsa, sndio or portaudio dev files are recommended (depending on what audio system you are using). Not sure how to get the pulseaudio dev files for other distros than debian/ubuntu or if they are bundled in pulseaudio. 
+Only FFTW, iniparser and the build tools are actually required for CAVA to compile, but this will only give you the ability to read from fifo files. To capture audio directlty from your system pipewire, pulseaudio, alsa, sndio, jack or portaudio dev files are required (depending on what audio system you are using).
 
-
-For better a better visual experience ncurses is also recomended.
+Ncurses can be used as an alternative output method if you have issues with the default one. But it is not required.
 
 All the requirements can be installed easily in all major distros:
 
+FreeBSD
+
+    pkg install autoconf autoconf-archive automake fftw3 iniparser jackit libglvnd libtool pkgconf psftools sdl2 sndio
+
+Additionally, run these commands on FreeBSD before building:
+
+    export CFLAGS="-I/usr/local/include"
+    export LDFLAGS="-L/usr/local/lib"
+
+
 Debian/Ubuntu:
 
-    sudo apt install build-essential libfftw3-dev libasound2-dev libncursesw5-dev libpulse-dev libtool automake autoconf-archive libiniparser-dev libsdl2-2.0-0 libsdl2-dev libpipewire-0.3-dev pkgconf
+    sudo apt install build-essential libfftw3-dev libasound2-dev libncursesw5-dev libpulse-dev libtool automake autoconf-archive libiniparser-dev libsdl2-2.0-0 libsdl2-dev libpipewire-0.3-dev libjack-jackd2-dev pkgconf
 
 
 ArchLinux:
@@ -184,6 +197,10 @@ Or you can change `PREFIX`, for example:
 
 All distro specific instalation sources might be out of date. Please check version before reporting any issues here.
 
+
+#### FreeBSD
+
+    pkg install cava
 
 #### openSUSE
 
@@ -278,7 +295,7 @@ To make it persistent across boot add the line `snd-aloop` to "/etc/modules". To
 
 Playing the audio through your Loopback interface makes it possible for cava to capture it, but there will be no sound in your speakers. In order to play audio on the loopback interface and your actual interface you must make use of the ALSA multi channel.
 
-Look at the included example file `example_files/etc/asound.conf` on how to use the multi channel. I was able to make this work on my laptop (an Asus UX31 running Ubuntu), but I had no luck with the ALSA method on my Raspberry Pi (Rasbian) with an USB DAC. The PulseAudio method however works perfectly on my Pi. 
+Look at the included example file `example_files/etc/asound.conf` on how to use the multi channel. I was able to make this work with a HDA Intel PCH sound card, but I had no luck with the an USB DAC.
 
 Read more about the ALSA method [here](http://stackoverflow.com/questions/12984089/capture-playback-on-play-only-sound-card-with-alsa).
 
@@ -287,6 +304,12 @@ If you are having problems with the alsa method on Rasberry PI, try enabling `mm
 ```
 dtoverlay=i2s-mmap
 ```
+
+#### dmix
+
+@reluekiss, was able to make cava work with dmix. Check out the example config in `example_files/etc/asound_dmix.conf` and issue [534](https://github.com/karlstav/cava/issues/534).
+
+
 
 ### mpd
 
@@ -311,20 +334,211 @@ I had some trouble with sync (the visualizer was ahead of the sound). Reducing t
             buffer_time     "50000"   # (50ms); default is 500000 microseconds (0.5s)
     }
 
-### sndio
+### Sndio
 
-sndio is the audio framework used on OpenBSD, but it's also available on
-FreeBSD and Linux. So far this is only tested on FreeBSD.
+Set
 
-To test it
-```bash
-# Start sndiod with a monitor sub-device
-$ sndiod -dd -s default -m mon -s monitor
+    method = sndio
 
-# Set the AUDIODEVICE environment variable to override the default
-# sndio device and run cava
-$ AUDIODEVICE=snd/0.monitor cava
+Sndio is the audio framework used on OpenBSD, but it's also available on FreeBSD, NetBSD and Linux.
+So far this is only tested on FreeBSD, but it's probably very similar on other operating systems. The
+following example demonstrates how to setup CAVA for sndio on FreeBSD (please consult the [OSS](#oss)
+section for a deeper explanation of the various `pcmX` sound devices and the corresponding `/dev/dspX`
+audio devices in this example).
+```sh
+$ cat /dev/sndstat
+Installed devices:
+pcm0: <Realtek ALC1220 (Rear Analog)> (play/rec) default
+pcm1: <Realtek ALC1220 (Front Analog Mic)> (rec)
+pcm2: <USB audio> (play/rec)
+No devices installed from userspace.
 ```
+Sndio operates on device descriptors. In general for every `/dev/dspX` audio device there is a corresponding
+`rsnd/X` sndio raw device descriptor. In this example there are `rsnd/0`, `rsnd/1` and `rsnd/2` (they
+are not listed in `/dev`, sndio uses these descriptors to access the corresponding audio devices internally).
+Sndio also handles the implicit `default` device descriptor, which acts like a symlink to the raw device
+descriptor corresponding to the default audio device `/dev/dsp`. In this example it acts like a symlink
+to `rsnd/0` because the default audio device `/dev/dsp` symlinks to `/dev/dsp0`. Sndio also evaluates
+the environment variables `AUDIODEVICE` and `AUDIORECDEVICE`. If one of these is set (`AUDIORECDEVICE`
+overrides `AUDIODEVICE` if both are set) and a sndio-aware program tries to open the `default` device
+descriptor or an unspecified device descriptor, then the program will use the device descriptor specified
+in the environment variable.
+
+Now in order to visualize the mic input in CAVA, the `source` value in the configuration file must
+be set to the corresponding audio descriptor:
+
+    source = default    # default; symlink to rsnd/0 in this example; AUDIORECDEVICE and AUDIODEVICE evaluation
+    source =            # unspecified device descriptor; same as default above
+    source = rsnd/0     # for the pcm0 mic on the rear
+    source = rsnd/1     # for the pcm1 mic on the front
+    source = rsnd/2     # for the pcm2 mic on the USB headset
+
+With `source = default` one can switch the visualization on the commandline without changing the configuration
+file again:
+```sh
+$ AUDIODEVICE=rsnd/0 cava
+$ AUDIODEVICE=rsnd/1 cava
+$ AUDIODEVICE=rsnd/2 cava
+```
+Sndio can't record the played back audio with just the raw device descriptors, i.e. the sounds from
+a music player or a browser which play on the external stereo speakers through `rsnd/0` are not visualized
+in CAVA. For this to work the sndio server has to be started and a monitoring sub-device has to be
+created. The following example shows how to start the server and create a monitoring sub-device `snd/0`
+from `rsnd/0` and then start CAVA with `AUDIODEVICE` pointing to the new monitoring sub-device:
+```sh
+$ sndiod -f rsnd/0 -m play,mon
+$ AUDIODEVICE=snd/0 cava
+```
+Switch between the speakers and the USB headset:
+```sh
+$ sndiod -f rsnd/2 -m play,mon -s usb -f rsnd/0 -m play,mon -s speakers
+$ AUDIODEVICE=snd/usb cava
+$ AUDIODEVICE=snd/speakers cava
+```
+Consult the manpage `sndiod(8)` for further information regarding configuration and startup of a sndio
+server.
+
+### OSS
+
+Set
+
+    method = oss
+
+The audio system used on FreeBSD is the Open Sound System (OSS).
+The following example demonstrates how to setup CAVA for OSS on FreeBSD:
+```sh
+$ cat /dev/sndstat
+Installed devices:
+pcm0: <Realtek ALC1220 (Rear Analog)> (play/rec) default
+pcm1: <Realtek ALC1220 (Front Analog Mic)> (rec)
+pcm2: <USB audio> (play/rec)
+No devices installed from userspace.
+```
+The system has three `pcm` sound devices, `pcm0`, `pcm1` and `pcm2`. `pcm0` corresponds to the analog
+output jack on the rear, in which external stereo speakers are plugged in, and the analog input jack,
+in which one could plug in a microphone. Because it encapsulates both, output and input, it is marked
+as `play/rec`. It is also set as the `default` sound device. `pcm1` corresponds to another analog input
+jack for a mic on the front side and is marked `rec`. A USB headset with an integrated mic is plugged
+in an USB port and the system has created the `pcm2` sound device with `play/rec` capabilities for
+it.
+
+In general for every `pcmX` device there is a corresponding `/dev/dspX` audio device. In this example
+there are `/dev/dsp0`, `/dev/dsp1` and `/dev/dsp2` (the system creates them when needed, they are not
+listed via `ls /dev` if they are currently not in use). The system also creates an implicit `/dev/dsp`,
+which acts like a symlink to the `default` audio device, in this example to `/dev/dsp0`.
+
+Now in order to visualize the mic input in CAVA, the `source` value in the configuration file must
+be set to the corresponding audio device:
+
+    source = /dev/dsp     # default; symlink to /dev/dsp0 in this example
+    source = /dev/dsp0    # for the pcm0 mic on the rear
+    source = /dev/dsp1    # for the pcm1 mic on the front
+    source = /dev/dsp2    # for the pcm2 mic on the USB headset
+
+OSS can't record the outgoing audio on its own, i.e. the sounds from a music player or a browser which
+play on the external stereo speakers through `/dev/dsp0` are not visualized in CAVA. A solution is
+to use Virtual OSS. It can create virtual audio devices from existing audio devices, in particular
+it can create a loopback audio device from `/dev/dsp0` and from which the played back audio can be
+fed into CAVA:
+```sh
+$ doas pkg install virtual_oss
+$ doas virtual_oss -r44100 -b16 -c2 -s4ms -O /dev/dsp0 -R /dev/null -T /dev/sndstat -l dsp.cava
+
+$ cat /dev/sndstat
+Installed devices:
+pcm0: <Realtek ALC1220 (Rear Analog)> (play/rec) default
+pcm1: <Realtek ALC1220 (Front Analog Mic)> (rec)
+pcm2: <USB audio> (play/rec)
+Installed devices from userspace:
+dsp.cava: <Virtual OSS> (play/rec)
+```
+It created a virtual loopback device `/dev/dsp.cava` from `/dev/dsp0`. Now the audio is visualized
+in CAVA with `source = /dev/dsp.cava` in the configuration file. The playback program must have a configuration
+to use the `/dev/dsp.cava` device. For programs where this is not possible, e.g. which always use `/dev/dsp`,
+replace `-l dsp.cava` with `-l dsp`. Virtual OSS can be configured and started as a service on FreeBSD.
+
+### JACK
+
+Set
+
+    method = jack
+
+The JACK Audio Connection Kit (JACK) is a professional sound server API which is available on several
+operating systems, e.g. FreeBSD and Linux.
+
+CAVA is a JACK client with the base client name `cava` and adheres to the standard server start and
+stop behaviour, i.e. CAVA starts a JACK server if none is already running and the environment variable
+`JACK_START_SERVER` is defined, in which case the server also stops when all clients have exited. The
+`source` in the CAVA configuration file specifies the name of the JACK server to which CAVA tries to
+connect to. The default value is `default`, which is also the default JACK server name. The value can
+be empty, in which case it implies `default`. Therefore the following three entries are equivalent:
+
+    ; source = default
+    source = default
+    source =
+
+One exception is the combination of an empty `source` entry and the environment variable `JACK_DEFAULT_SERVER`.
+If the environment variable is defined, e.g. `export JACK_DEFAULT_SERVER=foo`, then the following entries
+are equivalent:
+
+    source = foo
+    source =
+
+Consult the manpage `jackd(1)` for further information regarding configuration and startup of a JACK
+server.
+
+CAVA creates terminal audio-typed (so no MIDI support) input ports. These ports can connect to output
+ports of other JACK clients, e.g. connect to the output ports of a music player and CAVA will visualize
+the music. Currently CAVA supports up to two input ports, i.e. it supports mono and stereo. The number
+of input ports can be controlled via the `channels` option in the input section of the configuration
+file:
+
+    channels = 1    # one input port, mono
+    channels = 2    # two input ports, stereo (default)
+
+The port's short name is simply `M` for mono, and `L` and `R` for stereo. The full name of the input
+port according to the base client name is `cava:M` for mono, and `cava:L` and `cava:R` for stereo.
+
+The option `autoconnect` controls the connection strategy for CAVA's ports to other client's ports:
+
+    autoconnect = 0    # don't connect to other ports automatically
+    autoconnect = 1    # only connect to other ports during startup
+    autoconnect = 2    # reconnect to new ports regularly (default)
+
+The automatic connection strategies scan the physical terminal input-ports, i.e. the real audio device
+which actually outputs the sound, and applies the same connections to CAVA's ports. In this way CAVA
+visualizes the played back audio from JACK clients by default.
+
+In order to control and manage the connection between CAVA's ports and ports of other client programs,
+there are connection management programs for JACK. Some well known connection managers with a graphical
+user interface are QjackCtl and Cadence. The JACK package itself often comes with CLI tools. Depending
+on the operating system it could be necessary to install them separately, e.g. on FreeBSD:
+```sh
+$ doas pkg install jack-example-tools
+```
+Among the tools are the programs `jack_lsp` and `jack_connect`. These two tools are enough to list
+and connect ports on the commandline. The following example demonstrates how to setup connections with
+these tools:
+```sh
+$ jack_lsp
+system:capture_1
+system:capture_2
+system:playback_1
+system:playback_2
+cava:L
+moc:output0
+moc:output1
+cava:R
+```
+This listing shows all full port names that are currently available. These correspond to two external
+JACK clients, `cava` and `moc`, and one internal JACK client `system`. The types and current active
+connections between the ports can be listed with the `-p` and `-c` switches for `jack_lsp`. In order
+to connect the ports of CAVA and MOC, `jack_connect` is used:
+```sh
+$ jack_connect cava:L moc:output0
+$ jack_connect cava:R moc:output1
+```
+Now CAVA visualizes the outgoing audio from MOC.
 
 ### squeezelite
 [squeezelite](https://en.wikipedia.org/wiki/Squeezelite) is one of several software clients available for the Logitech Media Server. Squeezelite can export its audio data as shared memory, which is what this input module uses.

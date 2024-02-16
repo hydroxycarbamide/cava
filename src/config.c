@@ -49,19 +49,21 @@ const char *default_shader_name[NUMBER_OF_SHADERS] = {"northern_lights.frag", "p
 double smoothDef[5] = {1, 1, 1, 1, 1};
 
 enum input_method default_methods[] = {
-    INPUT_FIFO, INPUT_PORTAUDIO, INPUT_ALSA, INPUT_PIPEWIRE, INPUT_PULSE, INPUT_WINSCAP,
+    INPUT_FIFO,  INPUT_PORTAUDIO, INPUT_ALSA,    INPUT_SNDIO, INPUT_JACK,
+    INPUT_PULSE, INPUT_PIPEWIRE,  INPUT_WINSCAP, INPUT_OSS,
 };
 
 char *outputMethod, *orientation, *channels, *xaxisScale, *monoOption, *fragmentShader,
     *vertexShader;
 
 const char *input_method_names[] = {
-    "fifo", "portaudio", "pipewire", "alsa", "pulse", "sndio", "shmem", "winscap",
+    "fifo", "portaudio", "pipewire", "alsa", "pulse", "sndio", "oss", "jack", "shmem", "winscap",
 };
 
 const bool has_input_method[] = {
     HAS_FIFO, /** Always have at least FIFO and shmem input. */
-    HAS_PORTAUDIO, HAS_PIPEWIRE, HAS_ALSA, HAS_PULSE, HAS_SNDIO, HAS_SHMEM, HAS_WINSCAP,
+    HAS_PORTAUDIO, HAS_PIPEWIRE, HAS_ALSA,  HAS_PULSE,   HAS_SNDIO,
+    HAS_OSS,       HAS_JACK,     HAS_SHMEM, HAS_WINSCAP,
 };
 
 enum input_method input_method_by_name(const char *str) {
@@ -133,6 +135,15 @@ bool validate_colors(void *params, void *err) {
     }
 
     if (p->gradient) {
+        if (p->gradient_count < 2) {
+            write_errorf(error, "\nAtleast two colors must be given as gradient!\n");
+            return false;
+        }
+        if (p->gradient_count > 8) {
+            write_errorf(error, "\nMaximum 8 colors can be specified as gradient!\n");
+            return false;
+        }
+
         for (int i = 0; i < p->gradient_count; i++) {
             if (!validate_color(p->gradient_colors[i], p, error)) {
                 write_errorf(
@@ -186,17 +197,6 @@ bool validate_colors(void *params, void *err) {
     if (p->bcolor[0] == '#')
         p->bgcol = 8;
     // default if invalid
-    if (p->gradient) {
-
-        if (p->gradient_count < 2) {
-            write_errorf(error, "\nAtleast two colors must be given as gradient!\n");
-            return false;
-        }
-        if (p->gradient_count > 8) {
-            write_errorf(error, "\nMaximum 8 colors can be specified as gradient!\n");
-            return false;
-        }
-    }
 
     return true;
 }
@@ -333,7 +333,7 @@ bool validate_config(struct config_params *p, struct error_s *error) {
     if (p->stereo == -1) {
         write_errorf(
             error,
-            "output channels %s is not supported, supported channelss are: 'mono' and 'stereo'\n",
+            "output channels %s is not supported, supported channels are: 'mono' and 'stereo'\n",
             channels);
         return false;
     }
@@ -393,6 +393,12 @@ bool validate_config(struct config_params *p, struct error_s *error) {
         return false;
     }
     p->sens = p->sens / 100;
+
+    // validate: channels
+    if (p->channels <= 1)
+        p->channels = 1;
+    else
+        p->channels = 2;
 
     return validate_colors(p, error);
 }
@@ -551,7 +557,6 @@ bool load_config(char configPath[PATH_MAX], struct config_params *p, bool colors
     monoOption = malloc(sizeof(char) * 32);
     p->raw_target = malloc(sizeof(char) * 129);
     p->data_format = malloc(sizeof(char) * 32);
-    channels = malloc(sizeof(char) * 32);
     orientation = malloc(sizeof(char) * 32);
     vertexShader = malloc(sizeof(char) * PATH_MAX / 2);
     fragmentShader = malloc(sizeof(char) * PATH_MAX / 2);
@@ -584,12 +589,7 @@ bool load_config(char configPath[PATH_MAX], struct config_params *p, bool colors
     }
 #ifndef _MSC_VER
 
-#ifdef NCURSES
-    outputMethod = strdup(iniparser_getstring(ini, "output:method", "ncurses"));
-#endif
-#ifndef NCURSES
     outputMethod = strdup(iniparser_getstring(ini, "output:method", "noncurses"));
-#endif
 
     orientation = strdup(iniparser_getstring(ini, "output:orientation", "bottom"));
     xaxisScale = strdup(iniparser_getstring(ini, "output:xaxis", "none"));
@@ -643,6 +643,7 @@ bool load_config(char configPath[PATH_MAX], struct config_params *p, bool colors
     p->sdl_height = iniparser_getint(ini, "output:sdl_height", 500);
     p->sdl_x = iniparser_getint(ini, "output:sdl_x", -1);
     p->sdl_y = iniparser_getint(ini, "output:sdl_y", -1);
+    p->sdl_full_screen = iniparser_getint(ini, "output:sdl_full_screen", 0);
 
     if (strcmp(outputMethod, "sdl") == 0 || strcmp(outputMethod, "sdl_glsl") == 0) {
         free(p->color);
@@ -654,6 +655,12 @@ bool load_config(char configPath[PATH_MAX], struct config_params *p, bool colors
     }
 
     p->continuous_rendering = iniparser_getint(ini, "output:continuous_rendering", 0);
+
+    p->disable_blanking = iniparser_getint(ini, "output:disable_blanking", 0);
+
+    p->show_idle_bar_heads = iniparser_getint(ini, "output:show_idle_bar_heads", 1);
+
+    p->waveform = iniparser_getint(ini, "output:waveform", 0);
 
     p->sync_updates = iniparser_getint(ini, "output:alacritty_sync", 0);
 
@@ -682,6 +689,11 @@ bool load_config(char configPath[PATH_MAX], struct config_params *p, bool colors
 
     free(p->audio_source);
 
+    p->samplerate = iniparser_getint(ini, "input:sample_rate", 44100);
+    p->samplebits = iniparser_getint(ini, "input:sample_bits", 16);
+    p->channels = iniparser_getint(ini, "input:channels", 2);
+    p->autoconnect = iniparser_getint(ini, "input:autoconnect", 2);
+
     enum input_method default_input = INPUT_FIFO;
     for (size_t i = 0; i < ARRAY_SIZE(default_methods); i++) {
         enum input_method method = default_methods[i];
@@ -700,8 +712,6 @@ bool load_config(char configPath[PATH_MAX], struct config_params *p, bool colors
 #endif
     case INPUT_FIFO:
         p->audio_source = strdup(iniparser_getstring(ini, "input:source", "/tmp/mpd.fifo"));
-        p->fifoSample = iniparser_getint(ini, "input:sample_rate", 44100);
-        p->fifoSampleBits = iniparser_getint(ini, "input:sample_bits", 16);
         break;
 #ifdef PULSE
     case INPUT_PULSE:
@@ -716,6 +726,16 @@ bool load_config(char configPath[PATH_MAX], struct config_params *p, bool colors
 #ifdef SNDIO
     case INPUT_SNDIO:
         p->audio_source = strdup(iniparser_getstring(ini, "input:source", SIO_DEVANY));
+        break;
+#endif
+#ifdef OSS
+    case INPUT_OSS:
+        p->audio_source = strdup(iniparser_getstring(ini, "input:source", "/dev/dsp"));
+        break;
+#endif
+#ifdef JACK
+    case INPUT_JACK:
+        p->audio_source = strdup(iniparser_getstring(ini, "input:source", "default"));
         break;
 #endif
     case INPUT_SHMEM:
@@ -788,6 +808,8 @@ bool load_config(char configPath[PATH_MAX], struct config_params *p, bool colors
     p->sdl_y = GetPrivateProfileInt("output", "sdl_y", -1, configPath);
 
     p->sync_updates = GetPrivateProfileInt("output", "alacritty_sync", 0, configPath);
+    p->show_idle_bar_heads = GetPrivateProfileInt("output", "show_idle_bar_heads", 1, configPath);
+    p->waveform = GetPrivateProfileInt("output", "waveform", 0, configPath);
 
     p->userEQ_enabled = 0;
 

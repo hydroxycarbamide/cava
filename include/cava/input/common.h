@@ -25,18 +25,23 @@ struct audio_data {
     int format;
     unsigned int rate;
     unsigned int channels;
-    char *source;  // alsa device, fifo path or pulse source
-    int im;        // input mode alsa, fifo, pulse, portaudio, shmem or sndio
-    int terminate; // shared variable used to terminate audio thread
+    int threadparams; // shared variable used to prevent main thread from cava_init before input
+                      // threads have finalized parameters (0=allow cava_init, 1=disallow)
+    char *source;     // alsa device, fifo path or pulse source
+    int im;           // input mode alsa, fifo, pulse, portaudio, shmem or sndio
+    int terminate;    // shared variable used to terminate audio thread
     char error_message[1024];
     int samples_counter;
-    int IEEE_FLOAT;
+    int IEEE_FLOAT;  // format for 32bit (0=int, 1=float)
+    int autoconnect; // auto connect to audio source (0=off, 1=once at startup, 2=regularly)
     pthread_mutex_t lock;
     pthread_cond_t resumeCond;
     bool suspendFlag;
 };
 
 void reset_output_buffers(struct audio_data *data);
+void signal_threadparams(struct audio_data *data);
+void signal_terminate(struct audio_data *data);
 
 int write_to_cava_input_buffers(int16_t size, unsigned char *buf, void *data);
 

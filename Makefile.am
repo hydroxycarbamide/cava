@@ -8,8 +8,8 @@ cava_SOURCES = src/cava.c src/cavacore.c src/common.c src/config.c src/input/com
 
 cava_CPPFLAGS = -DPACKAGE=\"$(PACKAGE)\" -DVERSION=\"$(VERSION)\" \
            -D_POSIX_SOURCE -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE_EXTENDED \
-	   -DFONTDIR=\"@FONT_DIR@\" \
-       -I$(top_builddir) -I$(top_builddir)/include
+           -DFONTDIR=\"@FONT_DIR@\" -DFONTFILE=\"@FONT_FILE@\" \
+           -I$(top_builddir) -I$(top_builddir)/include
 cava_CFLAGS = -std=c99 -Wall -Wextra -Wno-unused-result -Wno-unknown-warning-option -Wno-maybe-uninitialized -Wno-vla-parameter
 
 if OSX
@@ -18,7 +18,17 @@ if OSX
 else
     cava_LDADD = -lrt
     cava_font_dir = @FONT_DIR@
-    cava_font__DATA = cava.psf
+    cava_font__DATA = @FONT_FILE@
+endif
+
+if FREEBSD
+if CAVAFONT
+    CLEANFILES = cava.bdf cava.fnt
+
+cava.fnt: ${srcdir}/cava.psf
+	${PSF2BDF} --fontname="-gnu-cava-medium-r-normal--16-160-75-75-c-80-iso10646-1" ${srcdir}/cava.psf cava.bdf
+	${VTFONTCVT} -o cava.fnt cava.bdf
+endif
 endif
 
 if ALSA
@@ -39,6 +49,14 @@ endif
 
 if SNDIO
     cava_SOURCES += src/input/sndio.c
+endif
+
+if OSS
+    cava_SOURCES += src/input/oss.c
+endif
+
+if JACK
+    cava_SOURCES += src/input/jack.c
 endif
 
 if NCURSES
